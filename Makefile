@@ -6,3 +6,8 @@ test_doge_4h:
 
 test_eth_4h:
 	python backtest.py --data-file data/yahoo_eth_4h.csv --symbol ETHUSD --quantity 0.01 --take-profit 1 --direction BUY --max-orders 75
+
+
+test_eth_15m:
+	python backtest.py --data-file data/yahoo_eth_usd_15m.csv --symbol ETHUSD --quantity 0.01 --take-profit 1 --direction BUY --max-orders 75
+
