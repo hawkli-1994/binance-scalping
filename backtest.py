@@ -38,12 +38,30 @@ class Trade:
 
 @dataclass
 class BacktestConfig:
-    """Configuration for backtesting."""
+    """Configuration for backtesting.
+    
+    This class defines the configuration parameters used for backtesting
+    the scalping strategy.
+    
+    Attributes:
+        symbol: Trading pair symbol to backtest
+        quantity: Order quantity for each trade
+        take_profit: Take profit value in absolute price terms (USDC) for closing positions
+        direction: Trading direction, either 'BUY' or 'SELL'
+        max_orders: Maximum number of orders allowed in backtest
+        wait_time: Time interval between checking market conditions
+    """
+    # 交易对符号，表示要交易的币种对，如BTCUSDC表示比特币兑USDC稳定币
     symbol: str = 'BTCUSDC'
+    # 每笔交易的数量，表示每次下单的币种数量
     quantity: float = 0.01
+    # 止盈点数，表示平仓获利的绝对价格值（以USDC为单位）表示的是单个币的价格变动值，而不是每个仓位的整体盈利值。
     take_profit: float = 1.0
+    # 交易方向，表示开仓方向，可以是'BUY'（做多）或'SELL'（做空）
     direction: str = 'BUY'
+    # 最大订单数，表示在回测中允许的最大订单数量
     max_orders: int = 75
+    # 等待时间，表示检查市场条件的时间间隔（秒）
     wait_time: int = 30
 
     @property
@@ -245,6 +263,10 @@ class BacktestEngine:
         
         # Calculate annualized return
         if self.initial_capital > 0 and years > 0:
+            # 修正年化收益率计算
+            # cumulative_pnl是以USDC为单位的绝对利润
+            # initial_capital是初始投入资本(价格*数量)
+            # 所以total_return应该是绝对利润与初始资本的比率
             total_return = self.cumulative_pnl / self.initial_capital
             annualized_return = total_return / years
         else:
@@ -286,6 +308,11 @@ class BacktestEngine:
         # Calculate metrics
         metrics = self._calculate_metrics()
         
+        # Check if metrics calculation was successful
+        if metrics is None:
+            print("Error: Failed to calculate metrics")
+            return
+            
         print("Backtest completed")
         print(f"Total trades: {len(self.trades)}")
         print(f"Initial capital (approx): ${self.initial_capital:.2f} (based on {self.config.quantity} "
