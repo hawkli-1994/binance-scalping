@@ -97,12 +97,32 @@ python dashboard.py --refresh-rate 10
 python dashboard.py --api-key "your_key" --api-secret "your_secret"
 ```
 
+### Backtesting
+
+Run backtesting with historical data:
+```bash
+python backtest.py --data-file data/yahoo_btc_4h.csv --symbol BTCUSDC --quantity 0.01 --take-profit 100 --direction BUY --max-orders 75
+```
+
+Backtesting Parameters:
+
+| Argument        | Description                        | Default | Example |
+| --------------- | ---------------------------------- | ------- | ------- |
+| `--data-file`   | Path to historical data file       | -       | data/yahoo_btc_4h.csv |
+| `--symbol`      | Trading pair symbol                | BTCUSDC | ETHUSDC |
+| `--quantity`    | Order quantity                     | 0.01    | 0.02    |
+| `--take_profit` | Take profit in quote currency      | 1.0     | 100     |
+| `--direction`   | Trading direction                  | BUY     | SELL    |
+| `--max-orders`  | Maximum concurrent orders          | 75      | 5       |
+| `--wait-time`   | Wait time between orders (seconds) | 30      | 300     |
+
 ## Project Structure
 
 ```
 binance-scalping/
 ├── runbot.py          # Main trading bot
 ├── dashboard.py       # Real-time monitoring dashboard
+├── backtest.py        # Backtesting module for historical data testing
 ├── requirements.txt   # Python dependencies
 ├── .env.example      # Environment variables template
 ├── .gitignore        # Git ignore rules
@@ -114,9 +134,9 @@ binance-scalping/
 
 ### Trading Strategy
 
-1. **Order Placement**: The bot places limit orders at random price levels
+1. **Order Placement**: The bot places limit orders at the front of the order book queue to increase fill probability
 2. **Order Monitoring**: WebSocket connection monitors order status in real-time
-3. **Execution Handling**: When an order is filled, the bot automatically places a closing order
+3. **Execution Handling**: When an order is filled, the bot automatically places a take-profit order to lock in profit
 4. **Risk Management**: Configurable limits prevent excessive exposure
 
 ### Key Components
@@ -126,12 +146,13 @@ binance-scalping/
 - **BinanceClient**: API interaction and order placement
 - **TradingLogger**: Comprehensive logging and transaction tracking
 - **TradingDashboard**: Real-time monitoring interface
+- **Backtester**: Historical data analysis and strategy testing
 
 ### Order Flow
 
-1. Bot places an POST-ONLY open order at QUEUE 1 price ± offset
+1. Bot places a limit order at the front of the order book queue
 2. WebSocket monitors order status continuously
-3. When order fills, bot immediately places a closing limit order
+3. When order fills, bot immediately places a take-profit order
 4. Process repeats based on wait time and max orders configuration
 
 ## Logging
