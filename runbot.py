@@ -62,6 +62,9 @@ class TradingLogger:
         self.log_file = f"{symbol}_transactions_log.csv"
         self.debug_log_file = f"{symbol}_bot_activity.log"
         self.logger = self._setup_logger(log_to_console)
+        # Get timezone from environment variable, default to UTC
+        timezone_name = os.getenv('TIMEZONE', 'UTC')
+        self.timezone = pytz.timezone(timezone_name)
 
     def _setup_logger(self, log_to_console: bool) -> logging.Logger:
         """Setup the logger with proper configuration."""
@@ -101,7 +104,7 @@ class TradingLogger:
             with open(self.log_file, mode='a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow([
-                    datetime.now(pytz.timezone('Europe/Paris')).isoformat(),
+                    datetime.now(self.timezone).isoformat(),
                     self.symbol,
                     transaction_id,
                     tx_type,
