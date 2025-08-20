@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Backtesting module for the scalping strategy using historical data.
@@ -10,19 +11,17 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional
 import pytz
 import copy
-
+import pandas as pd
 
 @dataclass
 class Candle:
     """Represents a single candlestick data point."""
     timestamp: datetime
-    price: float
-    close: float
+    open: float
     high: float
     low: float
-    open: float
+    close: float
     volume: float
-
 
 @dataclass
 class Trade:
@@ -35,46 +34,39 @@ class Trade:
     status: str
     counter_order_id: Optional[str] = None
 
-
 @dataclass
 class BacktestConfig:
-    """Configuration for backtesting.
-    
-    This class defines the configuration parameters used for backtesting
-    the scalping strategy.
-    
-    Attributes:
-        symbol: Trading pair symbol to backtest
-        quantity: Order quantity for each trade
-        take_profit: Take profit value in absolute price terms (USDC) for closing positions
-        direction: Trading direction, either 'BUY' or 'SELL'
-        max_orders: Maximum number of orders allowed in backtest
-        wait_time: Time interval between checking market conditions
-    """
-    # 交易对符号，表示要交易的币种对，如BTCUSDC表示比特币兑USDC稳定币
+    """Configuration for backtesting."""
     symbol: str = 'BTCUSDC'
-    # 每笔交易的数量，表示每次下单的币种数量
     quantity: float = 0.01
-    # 止盈点数，表示平仓获利的绝对价格值（以USDC为单位）表示的是单个币的价格变动值，而不是每个仓位的整体盈利值。
     take_profit: float = 1.0
-    # 交易方向，表示开仓方向，可以是'BUY'（做多）或'SELL'（做空）
     direction: str = 'BUY'
-    # 最大订单数，表示在回测中允许的最大订单数量
     max_orders: int = 75
-    # 等待时间，表示检查市场条件的时间间隔（秒）
-    wait_time: int = 30
+    wait_time: int = 30  # In seconds, adjusted for candle timeframe
+    fee_rate: float = 0 # 0.02 / 100  # Binance taker fee
 
     @property
     def close_order_side(self) -> str:
         """Get the close order side based on bot direction."""
         return 'BUY' if self.direction == "SELL" else 'SELL'
 
+    def validate(self):
+        """Validate configuration parameters."""
+        if self.quantity <= 0:
+            raise ValueError("Quantity must be positive")
+        if self.take_profit <= 0:
+            raise ValueError("Take profit must be positive")
+        if self.max_orders <= 0:
+            raise ValueError("Max orders must be positive")
+        if self.direction not in ["BUY", "SELL"]:
+            raise ValueError("Direction must be 'BUY' or 'SELL'")
 
 class BacktestEngine:
     """Backtesting engine for the scalping strategy."""
 
     def __init__(self, config: BacktestConfig):
         self.config = config
+        self.config.validate()  # Validate config
         self.candles: List[Candle] = []
         self.trades: List[Trade] = []
         self.active_orders: Dict[str, float] = {}  # order_id -> price
@@ -82,41 +74,43 @@ class BacktestEngine:
         self.cumulative_pnl = 0.0
         self.last_order_time = 0
         self.order_counter = 0
-        
-        # For performance metrics
         self.initial_capital = 0.0
         self.peak_capital = 0.0
         self.max_drawdown = 0.0
         self.capital_history = []  # List of (timestamp, capital)
-        
+
     def load_data(self, csv_file_path: str):
         """Load candle data from CSV file."""
-        with open(csv_file_path, 'r') as file:
-            reader = csv.reader(file)
-            # Skip header rows
-            next(reader)  # Price,Close,High,Low,Open,Volume
-            next(reader)  # Ticker,BTC-USD,BTC-USD,BTC-USD,BTC-USD,BTC-USD
-            next(reader)  # Datetime,,,,,
+        try:
+            with open(csv_file_path, 'r') as file:
+                reader = csv.reader(file)
+                # Skip header rows
+                next(reader)  # Price,Close,High,Low,Open,Volume
+                next(reader)  # Ticker,BTC-USD,BTC-USD,BTC-USD,BTC-USD,BTC-USD
+                next(reader)  # Datetime,,,,,
+
+                for row in reader:
+                    if not row[0]:  # Skip empty rows
+                        continue
+                    timestamp = datetime.fromisoformat(row[0].replace('+00:00', ''))
+                    candle = Candle(
+                        timestamp=timestamp,
+                        open=float(row[4]),
+                        high=float(row[2]),
+                        low=float(row[3]),
+                        close=float(row[1]),
+                        volume=float(row[5]) if row[5] else 0.0
+                    )
+                    self.candles.append(candle)
             
-            for row in reader:
-                if not row[0]:  # Skip empty rows
-                    continue
-                    
-                timestamp = datetime.fromisoformat(row[0].replace('+00:00', ''))
-                candle = Candle(
-                    timestamp=timestamp,
-                    price=float(row[1]),
-                    close=float(row[1]),
-                    high=float(row[2]),
-                    low=float(row[3]),
-                    open=float(row[4]),
-                    volume=float(row[5]) if row[5] else 0.0
-                )
-                self.candles.append(candle)
-        
-        # Sort by timestamp
-        self.candles.sort(key=lambda x: x.timestamp)
-        print(f"Loaded {len(self.candles)} candles from {csv_file_path}")
+            # Sort by timestamp and validate
+            self.candles.sort(key=lambda x: x.timestamp)
+            if not self.candles:
+                raise ValueError("No valid candle data loaded")
+            print(f"Loaded {len(self.candles)} candles from {csv_file_path}")
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            raise
 
     def _generate_order_id(self) -> str:
         """Generate a unique order ID."""
@@ -126,10 +120,6 @@ class BacktestEngine:
     def _place_open_order(self, timestamp: datetime, price: float) -> str:
         """Place an open order at the specified price."""
         order_id = self._generate_order_id()
-        
-        # In real trading, we would place a LIMIT order at the best queue position
-        # For backtesting, we'll assume the order gets filled at the next candle
-        # if the price is favorable
         self.active_orders[order_id] = price
         self.trades.append(Trade(
             timestamp=timestamp,
@@ -139,7 +129,6 @@ class BacktestEngine:
             order_id=order_id,
             status="PLACED"
         ))
-        
         return order_id
 
     def _place_close_order(self, timestamp: datetime, open_price: float, open_order_id: str) -> str:
@@ -147,7 +136,6 @@ class BacktestEngine:
         close_price = open_price + (self.config.take_profit if self.config.direction == "BUY" 
                                    else -self.config.take_profit)
         order_id = self._generate_order_id()
-        
         self.active_orders[order_id] = close_price
         self.trades.append(Trade(
             timestamp=timestamp,
@@ -158,21 +146,38 @@ class BacktestEngine:
             status="PLACED",
             counter_order_id=open_order_id
         ))
-        
         return order_id
+
+    def _would_order_fill(self, order_id: str, order_price: float, candle: Candle) -> bool:
+        """Determine if an order would fill based on candle data."""
+        if self._is_open_order(order_id):
+            if self.config.direction == "BUY":
+                return candle.low <= order_price  # Market falls to or below buy price
+            else:  # SELL
+                return candle.high >= order_price  # Market rises to or above sell price
+        else:  # Close order
+            if self.config.close_order_side == "BUY":
+                return candle.low <= order_price  # Market falls to close buy price
+            else:  # SELL
+                return candle.high >= order_price  # Market rises to close sell price
+
+    def _is_open_order(self, order_id: str) -> bool:
+        """Check if an order is an open order."""
+        for trade in self.trades:
+            if trade.order_id == order_id:
+                return trade.order_type == "OPEN"
+        return False
 
     def _process_candle(self, candle: Candle):
         """Process a single candle."""
         current_time = candle.timestamp.timestamp()
         
-        # Check if any active orders would be filled based on this candle
-        # Create a copy to avoid "dictionary changed size during iteration" error
+        # Check if any active orders would be filled
         active_orders_copy = copy.deepcopy(self.active_orders)
         filled_orders = []
         
         for order_id, order_price in active_orders_copy.items():
-            # Check if order would be filled
-            if self._would_order_fill(order_price, candle):
+            if self._would_order_fill(order_id, order_price, candle):
                 filled_orders.append(order_id)
                 
                 # Update trade status
@@ -180,40 +185,28 @@ class BacktestEngine:
                     if trade.order_id == order_id:
                         trade.status = "FILLED"
                         trade.timestamp = candle.timestamp
+                        trade.price = candle.close  # Use close price for fill
                         break
                 
-                # Handle order fill
                 if self._is_open_order(order_id):
-                    # Open order filled, place close order
                     self.filled_orders[order_id] = order_price
                     close_order_id = self._place_close_order(candle.timestamp, order_price, order_id)
                     print(f"[{candle.timestamp}] Open order {order_id} filled at {order_price}, "
-                          f"placed close order {close_order_id} at {order_price + self.config.take_profit}")
+                          f"placed close order {close_order_id} at {self.active_orders[close_order_id]}")
                 else:
                     # Close order filled, realize profit
-                    profit = self.config.take_profit * self.config.quantity
+                    profit = (self.config.take_profit * self.config.quantity - 
+                             2 * self.config.fee_rate * candle.close * self.config.quantity)
                     self.cumulative_pnl += profit
-                    print(f"[{candle.timestamp}] Close order filled, profit: {profit}, "
-                          f"cumulative PnL: {self.cumulative_pnl}")
+                    print(f"[{candle.timestamp}] Close order {order_id} filled at {order_price}, "
+                          f"profit: {profit:.6f}, cumulative PnL: {self.cumulative_pnl:.6f}")
                     
-                    # Record capital for drawdown calculation
-                    current_capital = self.initial_capital + self.cumulative_pnl
-                    self.capital_history.append((candle.timestamp, current_capital))
-                    
-                    # Update peak capital and max drawdown
-                    if current_capital > self.peak_capital:
-                        self.peak_capital = current_capital
-                    drawdown = (self.peak_capital - current_capital) / self.peak_capital if self.peak_capital > 0 else 0
-                    if drawdown > self.max_drawdown:
-                        self.max_drawdown = drawdown
-                    
-                    # Remove the corresponding open order from filled orders
+                    # Remove corresponding open order
                     open_order_id = None
                     for trade in self.trades:
                         if trade.order_id == order_id and trade.counter_order_id:
                             open_order_id = trade.counter_order_id
                             break
-                    
                     if open_order_id and open_order_id in self.filled_orders:
                         del self.filled_orders[open_order_id]
         
@@ -225,32 +218,28 @@ class BacktestEngine:
         # Place new orders if conditions are met
         if (len(self.active_orders) < self.config.max_orders and 
             (self.last_order_time == 0 or current_time - self.last_order_time >= self.config.wait_time)):
-            
             open_order_id = self._place_open_order(candle.timestamp, candle.open)
             self.last_order_time = current_time
             print(f"[{candle.timestamp}] Placed open order {open_order_id} at {candle.open}")
 
-    def _would_order_fill(self, order_price: float, candle: Candle) -> bool:
-        """Determine if an order would fill based on candle data."""
-        # Simplified fill logic - in real market, this would depend on order book
-        # For BUY orders, fill if order_price >= low price
-        # For SELL orders, fill if order_price <= high price
-        if self.config.direction == "BUY":
-            return order_price >= candle.low
-        else:  # SELL
-            return order_price <= candle.high
-
-    def _is_open_order(self, order_id: str) -> bool:
-        """Check if an order is an open order."""
-        for trade in self.trades:
-            if trade.order_id == order_id:
-                return trade.order_type == "OPEN"
-        return False
+        # Calculate unrealized PnL and update capital
+        unrealized = 0
+        for open_id, open_price in self.filled_orders.items():
+            current_price = candle.close
+            direction_factor = 1 if self.config.direction == "BUY" else -1
+            unrealized += direction_factor * (current_price - open_price) * self.config.quantity
+        current_capital = self.initial_capital + self.cumulative_pnl + unrealized
+        self.capital_history.append((candle.timestamp, current_capital))
+        if current_capital > self.peak_capital:
+            self.peak_capital = current_capital
+        drawdown = (self.peak_capital - current_capital) / self.peak_capital if self.peak_capital > 0 else 0
+        if drawdown > self.max_drawdown:
+            self.max_drawdown = drawdown
 
     def _calculate_metrics(self):
         """Calculate performance metrics."""
         if not self.candles:
-            return
+            return None
             
         start_time = self.candles[0].timestamp
         end_time = self.candles[-1].timestamp
@@ -261,17 +250,10 @@ class BacktestEngine:
         months = days / 30
         years = days / 365
         
-        # Calculate annualized return
-        if self.initial_capital > 0 and years > 0:
-            # 修正年化收益率计算
-            # cumulative_pnl是以USDC为单位的绝对利润
-            # initial_capital是初始投入资本(价格*数量)
-            # 所以total_return应该是绝对利润与初始资本的比率
-            total_return = self.cumulative_pnl / self.initial_capital
-            annualized_return = total_return / years
-        else:
-            total_return = float('inf')  # Cannot calculate without initial capital
-            annualized_return = float('inf')
+        # Calculate returns using final capital
+        final_capital = self.capital_history[-1][1] if self.capital_history else self.initial_capital
+        total_return = (final_capital / self.initial_capital - 1) if self.initial_capital > 0 else float('inf')
+        annualized_return = ((1 + total_return) ** (1 / years) - 1) if years > 0 else float('inf')
         
         return {
             "start_time": start_time,
@@ -281,8 +263,20 @@ class BacktestEngine:
             "period_years": years,
             "total_return": total_return,
             "annualized_return": annualized_return,
-            "max_drawdown": self.max_drawdown
+            "max_drawdown": self.max_drawdown,
+            "sharpe_ratio": self._calculate_sharpe_ratio(),
+            "final_capital": final_capital  # Added missing key
         }
+    def _calculate_sharpe_ratio(self):
+        """Calculate Sharpe ratio based on capital history."""
+        if len(self.capital_history) < 2:
+            return float('inf')
+        returns = pd.Series([c[1] for c in self.capital_history]).pct_change().dropna()
+        if len(returns) == 0:
+            return float('inf')
+        annualized_return = returns.mean() * (252 * 6)  # Assuming 4H candles
+        annualized_std = returns.std() * (252 * 6) ** 0.5
+        return annualized_return / annualized_std if annualized_std > 0 else float('inf')
 
     def run_backtest(self):
         """Run the backtest."""
@@ -292,11 +286,11 @@ class BacktestEngine:
             
         print(f"Starting backtest with {len(self.candles)} candles")
         print(f"Strategy: {self.config.direction} {self.config.quantity} @{self.config.symbol} "
-              f"TP: {self.config.take_profit} Max Orders: {self.config.max_orders}")
+            f"TP: {self.config.take_profit} Max Orders: {self.config.max_orders}")
         
-        # Set initial capital based on first candle price and order quantity
-        first_price = self.candles[0].price
-        self.initial_capital = first_price * self.config.quantity
+        # Set initial capital based on max exposure
+        first_price = self.candles[0].close
+        self.initial_capital = first_price * self.config.quantity * self.config.max_orders
         self.peak_capital = self.initial_capital
         self.capital_history.append((self.candles[0].timestamp, self.initial_capital))
         
@@ -307,27 +301,23 @@ class BacktestEngine:
         
         # Calculate metrics
         metrics = self._calculate_metrics()
-        
-        # Check if metrics calculation was successful
         if metrics is None:
             print("Error: Failed to calculate metrics")
             return
             
         print("Backtest completed")
         print(f"Total trades: {len(self.trades)}")
-        print(f"Initial capital (approx): ${self.initial_capital:.2f} (based on {self.config.quantity} "
-              f"contracts at price ${first_price:.2f})")
-        print(f"Cumulative PnL: {self.cumulative_pnl}")
-        print(f"Final capital: {self.initial_capital + self.cumulative_pnl:.2f}")
+        print(f"Initial capital: ${self.initial_capital:.2f} (based on {self.config.quantity} "
+            f"contracts * {self.config.max_orders} at price ${first_price:.2f})")
+        print(f"Cumulative PnL: {self.cumulative_pnl:.2f}")
+        print(f"Final capital: ${metrics['final_capital']:.2f}")  # Fixed to use correct key
         print(f"Time period: {metrics['period_days']:.1f} days ({metrics['period_months']:.1f} months, "
-              f"{metrics['period_years']:.2f} years)")
-        print(f"Total return: {metrics['total_return']*100:.2f}%" if metrics['total_return'] != float('inf') 
-              else "Total return: Cannot calculate (no initial capital)")
-        print(f"Annualized return: {metrics['annualized_return']*100:.2f}%" if metrics['annualized_return'] != float('inf') 
-              else "Annualized return: Cannot calculate (no initial capital)")
+            f"{metrics['period_years']:.2f} years)")
+        print(f"Total return: {metrics['total_return']*100:.2f}%")
+        print(f"Annualized return: {metrics['annualized_return']*100:.2f}%")
         print(f"Max drawdown: {metrics['max_drawdown']*100:.2f}%")
+        print(f"Sharpe ratio: {metrics['sharpe_ratio']:.2f}")
         print(f"Active orders remaining: {len(self.active_orders)}")
-
 
 def main():
     """Main entry point."""
@@ -363,7 +353,6 @@ def main():
     engine = BacktestEngine(config)
     engine.load_data(args.data_file)
     engine.run_backtest()
-
 
 if __name__ == "__main__":
     main()
