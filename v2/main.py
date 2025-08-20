@@ -1422,8 +1422,8 @@ async def main():
         'max_position_ratio': 0.03,
         'price_lookback': 50,
         'simulation_mode': True,
-        'backtest_mode': False,
-        'backtest_file': 'btcusdt_1m.csv',
+        'backtest_mode': True,
+        'backtest_file': '/home/krli/dreams/binance-scalping/data/yahoo_eth_usd_15m.csv',
         'stop_loss_atr_multiplier': 2.0,
         'take_profit_atr_multiplier': 3.0,  # ATR multiplier for take-profit
         'atr_period': 14,
