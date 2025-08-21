@@ -1,0 +1,81 @@
+{
+  "exchange": {
+    "exchange_id": "binance",
+    "api_key": "YOUR_API_KEY_HERE",
+    "api_secret": "YOUR_API_SECRET_HERE",
+    "testnet": true,
+    "sandbox_mode": true,
+    "timeout": 30000,
+    "enable_rate_limit": true
+  },
+  "trading": {
+    "symbol": "BTCUSDT",
+    "mode": "simulation",
+    "max_position_size": 0.1,
+    "min_trade_amount": 0.001,
+    "max_daily_trades": 50,
+    "cooldown_period": 60,
+    "risk_management": true,
+    "stop_loss_pct": 0.02,
+    "take_profit_pct": 0.03,
+    "trailing_stop": false,
+    "trailing_stop_pct": 0.01
+  },
+  "backtest": {
+    "data_file": "data/sample_ohlcv.csv",
+    "initial_balance": 10000.0,
+    "start_date": null,
+    "end_date": null,
+    "timeframe": "1m",
+    "include_fees": true,
+    "slippage": 0.001
+  },
+  "strategies": [
+    {
+      "name": "ma_crossover",
+      "type": "moving_average",
+      "enabled": true,
+      "parameters": {
+        "fast_period": 10,
+        "slow_period": 30
+      }
+    },
+    {
+      "name": "mean_reversion",
+      "type": "mean_reversion",
+      "enabled": false,
+      "parameters": {
+        "period": 20,
+        "std_dev_threshold": 2.0
+      }
+    },
+    {
+      "name": "grid_trading",
+      "type": "grid",
+      "enabled": false,
+      "parameters": {
+        "grid_spacing": 0.01,
+        "grid_levels": 10
+      }
+    }
+  ],
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file_path": "trading_bot.log",
+    "max_file_size": 10485760,
+    "backup_count": 5,
+    "console_output": true
+  },
+  "notifications": {
+    "telegram_enabled": false,
+    "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "telegram_chat_id": "YOUR_TELEGRAM_CHAT_ID",
+    "email_enabled": false,
+    "email_smtp_server": "smtp.gmail.com",
+    "email_smtp_port": 587,
+    "email_username": "your_email@gmail.com",
+    "email_password": "your_app_password",
+    "email_recipients": []
+  }
+}
